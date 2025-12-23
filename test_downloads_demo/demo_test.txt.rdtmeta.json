@@ -1,0 +1,9 @@
+{
+  "filename": "demo_test.txt",
+  "file_id": 188424520011068995,
+  "filesize": 51165,
+  "chunk_size": 1024,
+  "sha256": "029d6b1a463bb6430078cb9ab25a82e3b33c6eb308346dd91712e3e6ebd1fc36",
+  "next_chunk": 0,
+  "updated_at": 1766482846.1373801
+}
