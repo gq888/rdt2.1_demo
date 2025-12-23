@@ -31,7 +31,7 @@ def test_with_network_simulator():
     DOWNLOADS_DIR.mkdir(exist_ok=True)
     
     # 创建测试文件（50KB，足够大以观察重传行为）
-    test_file = create_test_file(50)
+    test_file = create_test_file(5)
     print(f"📁 测试文件: {test_file.name} ({test_file.stat().st_size}B)")
     
     # 启动接收端
