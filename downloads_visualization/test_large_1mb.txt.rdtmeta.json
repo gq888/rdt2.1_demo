@@ -1,9 +1,0 @@
-{
-  "filename": "test_large_1mb.txt",
-  "file_id": 5712830772260737531,
-  "filesize": 850000,
-  "chunk_size": 1024,
-  "sha256": "4f480d51ca8591fb4e4d52ade5b16933b65b6c8232cdb919277fd32cdc8da94b",
-  "next_chunk": 482,
-  "updated_at": 1766488976.037977
-}

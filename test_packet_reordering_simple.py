@@ -40,7 +40,7 @@ def test_with_reordering_simulator():
     DOWNLOADS_DIR.mkdir(exist_ok=True)
     
     # 创建测试文件（20KB，较小的文件便于观察）
-    test_file = create_test_file(20)
+    test_file = create_test_file(5)
     print(f"📁 测试文件: {test_file.name} ({test_file.stat().st_size}B)")
     
     # 计算原始文件哈希

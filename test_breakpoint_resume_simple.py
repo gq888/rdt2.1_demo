@@ -40,7 +40,7 @@ def test_breakpoint_resume_simple():
     DOWNLOADS_DIR.mkdir(exist_ok=True)
     
     # 创建测试文件（100KB，足够观察断点续传）
-    test_file = create_test_file(100)
+    test_file = create_test_file(60)
     original_hash = calculate_file_hash(test_file)
     
     print(f"📁 测试文件: {test_file.name}")

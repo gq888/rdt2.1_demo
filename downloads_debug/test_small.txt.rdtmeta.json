@@ -1,9 +1,0 @@
-{
-  "filename": "test_small.txt",
-  "file_id": 13259818111507657921,
-  "filesize": 1300,
-  "chunk_size": 1024,
-  "sha256": "b8045651a2b474c1537a5dcc43c6c6aed80c3ce3f32d5de1689607670b9c996b",
-  "next_chunk": 0,
-  "updated_at": 1766488452.556382
-}

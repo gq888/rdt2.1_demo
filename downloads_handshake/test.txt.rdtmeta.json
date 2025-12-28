@@ -1,9 +1,0 @@
-{
-  "filename": "test.txt",
-  "file_id": 12345,
-  "filesize": 100,
-  "chunk_size": 1024,
-  "sha256": "abc123",
-  "next_chunk": 0,
-  "updated_at": 1766488314.861717
-}

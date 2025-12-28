@@ -47,7 +47,22 @@ python tests/quick_local_demo.py
 ### 4.2 Linux tc/netem 注入丢包/延迟/乱序
 见 `tests/tc_netem_example.sh`（需要 root 权限）。
 
-## 5. 提交建议
-- 报告 PDF：按“学号1_学号2_作业2_标题.pdf”命名
-- 代码 zip：同命名规则
-- 报告中插入 Wireshark 截图：可用 `Magic=0xCAFE` 字段快速定位本协议报文
+### 4.3 网络模拟器测试脚本
+
+#### 4.3.1 10% 丢包率测试
+```bash
+python test_10_percent_loss_demo.py
+```
+演示 RDT2.1 协议在 10% 丢包率环境下的表现，包含详细的重传日志和传输统计。
+
+#### 4.3.2 数据包乱序测试
+```bash
+python test_packet_reordering_simple.py
+```
+测试 RDT2.1 协议处理数据包乱序的能力，验证接收文件的哈希一致性。
+
+#### 4.3.3 断点续传测试
+```bash
+python test_breakpoint_resume_simple.py
+```
+演示断点续传功能：模拟传输中断后从断点继续传输，验证文件完整性。
