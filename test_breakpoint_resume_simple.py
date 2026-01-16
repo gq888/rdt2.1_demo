@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RDT2.1协议断点续传功能测试 - 简化版
+RDT2.1协议断点续传功能测试 - 简化版（异步流式输出版）
 直接模拟传输中断，然后验证续传功能
 """
 
@@ -9,11 +9,67 @@ import sys
 import time
 import os
 import signal
+import threading
+import queue
 from pathlib import Path
 
 # 设置项目根目录
 TEST_DIR = Path(__file__).parent
 DOWNLOADS_DIR = TEST_DIR / "downloads"
+
+class AsyncStreamReader:
+    """最小化的异步流读取器"""
+    
+    def __init__(self, stream, name, log_prefix=""):
+        self.stream = stream
+        self.name = name
+        self.log_prefix = log_prefix
+        self.queue = queue.Queue()
+        self.thread = None
+        self.running = False
+        self.buffer = []
+        
+    def start(self):
+        """启动异步读取线程"""
+        self.running = True
+        self.thread = threading.Thread(target=self._read_stream, name=f"Reader-{self.name}")
+        self.thread.daemon = True
+        self.thread.start()
+        
+    def _read_stream(self):
+        """异步读取流数据"""
+        try:
+            for line in iter(self.stream.readline, ''):
+                if line and self.running:
+                    line = line.rstrip('\n\r')
+                    self.buffer.append(line)
+                    self.queue.put(line)
+                    # 实时输出
+                    self._output_line(line)
+                else:
+                    break
+        except Exception as e:
+            self.queue.put(f"[ERROR] Stream reader error: {e}")
+        finally:
+            self.running = False
+            
+    def _output_line(self, line):
+        """输出单行日志"""
+        timestamp = time.strftime("%H:%M:%S", time.localtime())
+        if self.log_prefix:
+            print(f"[{timestamp}] {self.log_prefix} {line}", flush=True)
+        else:
+            print(f"[{timestamp}] {line}", flush=True)
+            
+    def get_lines(self):
+        """获取所有已读取的行"""
+        return self.buffer.copy()
+        
+    def stop(self):
+        """停止读取线程"""
+        self.running = False
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=1.0)
 
 def create_test_file(size_kb: int) -> Path:
     """创建测试文件"""
@@ -32,8 +88,8 @@ def calculate_file_hash(file_path: Path) -> str:
     return sha256_hash.hexdigest()
 
 def test_breakpoint_resume_simple():
-    """简化版断点续传测试"""
-    print("🎯 RDT2.1协议断点续传功能测试")
+    """简化版断点续传测试 - 异步流式输出版"""
+    print("🎯 RDT2.1协议断点续传功能测试（异步流式输出）")
     print("="*80)
     
     # 确保下载目录存在
@@ -50,13 +106,18 @@ def test_breakpoint_resume_simple():
     # 第一步：启动传输，然后手动中断
     print(f"\n🔧 步骤1: 启动传输...")
     
-    # 启动接收端
+    # 启动接收端（异步方式）
     recv_cmd = [sys.executable, "-m", "rdtftp.cli_recv", "--port", "6666", "--out-dir", str(DOWNLOADS_DIR)]
     recv_proc = subprocess.Popen(recv_cmd, cwd=str(TEST_DIR), 
-                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    
+    # 创建接收端异步读取器
+    recv_reader = AsyncStreamReader(recv_proc.stdout, "receiver", "[RECV]")
+    recv_reader.start()
+    
     time.sleep(1.0)
     
-    # 启动网络模拟器（模拟不稳定网络）
+    # 启动网络模拟器（异步方式）
     print("🔧 启动网络模拟器...")
     sim_cmd = [
         sys.executable, "network_simulator_fixed.py",
@@ -68,10 +129,15 @@ def test_breakpoint_resume_simple():
         "--jitter", "30"         # 30ms抖动
     ]
     sim_proc = subprocess.Popen(sim_cmd, cwd=str(TEST_DIR),
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    
+    # 创建模拟器异步读取器
+    sim_reader = AsyncStreamReader(sim_proc.stdout, "simulator", "[SIM]")
+    sim_reader.start()
+    
     time.sleep(0.5)
     
-    # 启动发送端
+    # 启动发送端（异步方式）
     print(f"📤 开始传输文件...")
     send_cmd = [
         sys.executable, "-m", "rdtftp.cli_send",
@@ -83,9 +149,13 @@ def test_breakpoint_resume_simple():
         # 注意：默认启用断点续传（没有--no-resume标志）
     ]
     
-    # 运行传输一段时间，然后中断
+    # 运行传输一段时间，然后中断（异步方式）
     send_proc = subprocess.Popen(send_cmd, cwd=str(TEST_DIR),
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    
+    # 创建发送进程异步读取器
+    send_reader = AsyncStreamReader(send_proc.stdout, "sender", "[SEND]")
+    send_reader.start()
     
     # 让传输运行几秒钟（模拟部分传输）
     print(f"⏰ 让传输运行3秒，然后中断...")
@@ -98,6 +168,9 @@ def test_breakpoint_resume_simple():
         send_proc.wait(timeout=2)
     except subprocess.TimeoutExpired:
         send_proc.kill()
+    
+    # 停止发送读取器
+    send_reader.stop()
     
     # 检查部分传输的文件
     print(f"\n🔍 检查部分传输的文件...")
@@ -145,26 +218,40 @@ def test_breakpoint_resume_simple():
     except:
         sim_proc.kill()
     
+    # 停止读取器
+    recv_reader.stop()
+    sim_reader.stop()
+    
     # 第二步：从断点继续传输
     print(f"\n🔧 步骤2: 从断点继续传输...")
     if partial_file.exists() and partial_size > 0:
         print(f"🎯 检测到部分传输文件，将尝试断点续传")
         print(f"📊 续传起始位置: {interrupt_info}")
         
-        # 重新启动接收端
+        # 重新启动接收端（异步方式）
         print("🔧 重新启动接收端（断点续传模式）...")
         recv_cmd2 = [sys.executable, "-m", "rdtftp.cli_recv", "--port", "6666", "--out-dir", str(DOWNLOADS_DIR)]
         recv_proc2 = subprocess.Popen(recv_cmd2, cwd=str(TEST_DIR), 
-                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        
+        # 创建第二轮接收端读取器
+        recv_reader2 = AsyncStreamReader(recv_proc2.stdout, "receiver2", "[RECV2]")
+        recv_reader2.start()
+        
         time.sleep(1.0)
         
-        # 重新启动网络模拟器
+        # 重新启动网络模拟器（异步方式）
         print("🔧 重新启动网络模拟器...")
         sim_proc2 = subprocess.Popen(sim_cmd, cwd=str(TEST_DIR),
-                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        
+        # 创建第二轮模拟器读取器
+        sim_reader2 = AsyncStreamReader(sim_proc2.stdout, "simulator2", "[SIM2]")
+        sim_reader2.start()
+        
         time.sleep(0.5)
         
-        # 重新启动发送端（应该能从断点继续）
+        # 重新启动发送端（应该能从断点继续，异步方式）
         print(f"📤 从断点继续传输...")
         send_cmd2 = [
             sys.executable, "-m", "rdtftp.cli_send",
@@ -176,20 +263,24 @@ def test_breakpoint_resume_simple():
         ]
         
         resume_start_time = time.time()
-        result2 = subprocess.run(send_cmd2, cwd=str(TEST_DIR), 
-                                capture_output=True, text=True, timeout=120)
+        
+        # 使用异步方式启动续传进程
+        send_proc2 = subprocess.Popen(send_cmd2, cwd=str(TEST_DIR),
+                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        
+        # 创建续传进程读取器
+        send_reader2 = AsyncStreamReader(send_proc2.stdout, "sender2", "[SEND2]")
+        send_reader2.start()
+        
+        # 等待续传完成
+        exit_code2 = send_proc2.wait()
         resume_elapsed = time.time() - resume_start_time
         
         print(f"\n⏱️  续传完成！用时: {resume_elapsed:.3f}秒")
-        print(f"返回码: {result2.returncode}")
+        print(f"返回码: {exit_code2}")
         
-        # 显示续传日志
-        if result2.stdout:
-            print(f"\n📋 续传详细日志:")
-            print("-" * 80)
-            for line in result2.stdout.strip().split('\n'):
-                print(f"  {line}")
-            print("-" * 80)
+        # 停止续传读取器
+        send_reader2.stop()
         
         # 验证最终文件
         print(f"\n🔍 验证最终接收文件...")
@@ -215,8 +306,9 @@ def test_breakpoint_resume_simple():
             print(f"  ❌ 最终文件不存在！")
         
         # 分析续传行为
-        if result2.stdout:
-            resume_stats = analyze_resume_behavior(result2.stdout)
+        send_output2 = send_reader2.get_lines()
+        if send_output2:
+            resume_stats = analyze_resume_behavior('\n'.join(send_output2))
             print_resume_analysis(resume_stats, resume_elapsed)
         
         # 总体分析
@@ -230,6 +322,10 @@ def test_breakpoint_resume_simple():
             print(f"⏱️  续传用时: {resume_elapsed:.3f}秒")
         else:
             print(f"❌ 断点续传测试失败！")
+        
+        # 停止第二轮读取器
+        recv_reader2.stop()
+        sim_reader2.stop()
         
         # 清理
         try:

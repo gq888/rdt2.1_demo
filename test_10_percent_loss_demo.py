@@ -9,11 +9,67 @@ import sys
 import time
 import os
 import tempfile
+import threading
+import queue
 from pathlib import Path
 
 # 设置项目根目录
 TEST_DIR = Path(__file__).parent
 DOWNLOADS_DIR = TEST_DIR / "downloads"
+
+class AsyncStreamReader:
+    """最小化的异步流读取器"""
+    
+    def __init__(self, stream, name, log_prefix=""):
+        self.stream = stream
+        self.name = name
+        self.log_prefix = log_prefix
+        self.queue = queue.Queue()
+        self.thread = None
+        self.running = False
+        self.buffer = []
+        
+    def start(self):
+        """启动异步读取线程"""
+        self.running = True
+        self.thread = threading.Thread(target=self._read_stream, name=f"Reader-{self.name}")
+        self.thread.daemon = True
+        self.thread.start()
+        
+    def _read_stream(self):
+        """异步读取流数据"""
+        try:
+            for line in iter(self.stream.readline, ''):
+                if line and self.running:
+                    line = line.rstrip('\n\r')
+                    self.buffer.append(line)
+                    self.queue.put(line)
+                    # 实时输出
+                    self._output_line(line)
+                else:
+                    break
+        except Exception as e:
+            self.queue.put(f"[ERROR] Stream reader error: {e}")
+        finally:
+            self.running = False
+            
+    def _output_line(self, line):
+        """输出单行日志"""
+        timestamp = time.strftime("%H:%M:%S", time.localtime())
+        if self.log_prefix:
+            print(f"[{timestamp}] {self.log_prefix} {line}", flush=True)
+        else:
+            print(f"[{timestamp}] {line}", flush=True)
+            
+    def get_lines(self):
+        """获取所有已读取的行"""
+        return self.buffer.copy()
+        
+    def stop(self):
+        """停止读取线程"""
+        self.running = False
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=1.0)
 
 def create_test_file(size_kb: int) -> Path:
     """创建测试文件"""
@@ -23,25 +79,30 @@ def create_test_file(size_kb: int) -> Path:
     return test_file
 
 def test_with_network_simulator():
-    """使用网络模拟器测试10%丢包率"""
-    print("🎯 RDT2.1协议10%丢包率环境演示")
+    """使用网络模拟器测试10%丢包率 - 异步流式输出版"""
+    print("🎯 RDT2.1协议10%丢包率环境演示（异步流式输出）")
     print("="*80)
     
     # 确保下载目录存在
     DOWNLOADS_DIR.mkdir(exist_ok=True)
     
     # 创建测试文件（50KB，足够大以观察重传行为）
-    test_file = create_test_file(5)
+    test_file = create_test_file(50)
     print(f"📁 测试文件: {test_file.name} ({test_file.stat().st_size}B)")
     
-    # 启动接收端
+    # 启动接收端（异步方式）
     print("\n🔧 启动接收端...")
     recv_cmd = [sys.executable, "-m", "rdtftp.cli_recv", "--port", "6666", "--out-dir", str(DOWNLOADS_DIR)]
     recv_proc = subprocess.Popen(recv_cmd, cwd=str(TEST_DIR), 
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    
+    # 创建接收端异步读取器
+    recv_reader = AsyncStreamReader(recv_proc.stdout, "receiver", "[RECV]")
+    recv_reader.start()
+    
     time.sleep(1.0)  # 确保接收端启动
     
-    # 启动网络模拟器（10%丢包率）
+    # 启动网络模拟器（10%丢包率，异步方式）
     print("🔧 启动网络模拟器（10%丢包率）...")
     sim_cmd = [
         sys.executable, "network_simulator_fixed.py",
@@ -53,10 +114,15 @@ def test_with_network_simulator():
         "--jitter", "10"        # 10ms抖动
     ]
     sim_proc = subprocess.Popen(sim_cmd, cwd=str(TEST_DIR),
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    
+    # 创建模拟器异步读取器
+    sim_reader = AsyncStreamReader(sim_proc.stdout, "simulator", "[SIM]")
+    sim_reader.start()
+    
     time.sleep(0.5)  # 确保模拟器启动
     
-    # 发送文件
+    # 发送文件（异步流式输出）
     print(f"\n📤 开始传输文件（通过10%丢包网络）...")
     send_cmd = [
         sys.executable, "-m", "rdtftp.cli_send",
@@ -67,32 +133,46 @@ def test_with_network_simulator():
         "--max-retry", "50"    # 最多重试50次
     ]
     
+    # 使用异步方式启动发送进程
+    send_proc = subprocess.Popen(
+        send_cmd,
+        cwd=str(TEST_DIR),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1
+    )
+    
+    # 创建发送进程异步读取器
+    send_reader = AsyncStreamReader(send_proc.stdout, "sender", "[SEND]")
+    send_reader.start()
+    
     start_time = time.time()
-    result = subprocess.run(send_cmd, cwd=str(TEST_DIR), 
-                           capture_output=True, text=True, timeout=120)
+    
+    # 等待发送进程完成
+    exit_code = send_proc.wait()
     elapsed = time.time() - start_time
     
     print(f"\n⏱️  传输完成！用时: {elapsed:.3f}秒")
-    print(f"返回码: {result.returncode}")
+    print(f"返回码: {exit_code}")
     
-    # 显示详细传输日志
-    if result.stdout:
-        print(f"\n📋 详细传输日志:")
-        print("-" * 80)
-        for line in result.stdout.strip().split('\n'):
-            print(f"  {line}")
-        print("-" * 80)
+    # 获取传输日志用于后续分析
+    send_output = send_reader.get_lines()
     
-    # 显示网络模拟器日志
+    # 停止所有异步读取器
+    send_reader.stop()
+    
+    # 获取网络模拟器输出
     if sim_proc.poll() is None:  # 如果模拟器还在运行
         sim_proc.terminate()
         sim_proc.wait(timeout=2)
     
-    sim_output = sim_proc.stdout.read()
+    sim_reader.stop()
+    sim_output = sim_reader.get_lines()
     if sim_output:
         print(f"\n🌐 网络模拟器日志:")
         print("-" * 80)
-        for line in sim_output.strip().split('\n'):
+        for line in sim_output:
             if line.strip() and any(keyword in line for keyword in ['丢包', '延迟', '转发']):
                 print(f"  {line}")
         print("-" * 80)
@@ -131,8 +211,8 @@ def test_with_network_simulator():
             print(f"  📁 downloads目录内容: {[f.name for f in files]}")
     
     # 分析传输统计
-    if result.stdout:
-        stats = analyze_transmission_log(result.stdout)
+    if send_output:
+        stats = analyze_transmission_log('\n'.join(send_output))
         print_stats_summary(stats, elapsed, test_file.stat().st_size)
     
     # 清理
@@ -142,7 +222,8 @@ def test_with_network_simulator():
     else:
         print("❌ 10%丢包率测试失败！")
     
-    # 终止进程
+    # 停止接收端读取器并终止进程
+    recv_reader.stop()
     try:
         recv_proc.terminate()
         recv_proc.wait(timeout=2)
