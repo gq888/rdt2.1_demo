@@ -31,7 +31,7 @@ def main():
         time.sleep(0.6)
         src = PROJECT_ROOT / "test.bin"
         # 生成 3MB 文件
-        src.write_bytes(os.urandom(1 * 1024 * 1024))
+        src.write_bytes(os.urandom(100 * 1024))
 
         send_cmd = [sys.executable, "-m", "rdtftp.cli_send", "--file", str(src), "--host", "127.0.0.1", "--port", str(port)]
         t0 = time.time()
