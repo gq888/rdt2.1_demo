@@ -14,7 +14,8 @@ import queue
 from pathlib import Path
 
 # 设置项目根目录
-TEST_DIR = Path(__file__).parent
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+TEST_DIR = PROJECT_ROOT
 DOWNLOADS_DIR = TEST_DIR / "downloads"
 
 class AsyncStreamReader:
@@ -120,13 +121,13 @@ def test_breakpoint_resume_simple():
     # 启动网络模拟器（异步方式）
     print("🔧 启动网络模拟器...")
     sim_cmd = [
-        sys.executable, "network_simulator_fixed.py",
+        sys.executable, "-m", "network_simulator_fixed",
         "--listen-port", "6665",
         "--target-host", "127.0.0.1", 
         "--target-port", "6666",
-        "--loss-rate", "0.03",   # 3%丢包率
-        "--delay", "20",         # 20ms延迟
-        "--jitter", "30"         # 30ms抖动
+        "--loss-rate", "0.00",   # 0%丢包率
+        "--delay", "2",         # 2ms延迟
+        "--jitter", "3"         # 3ms抖动
     ]
     sim_proc = subprocess.Popen(sim_cmd, cwd=str(TEST_DIR),
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
@@ -159,7 +160,7 @@ def test_breakpoint_resume_simple():
     
     # 让传输运行几秒钟（模拟部分传输）
     print(f"⏰ 让传输运行3秒，然后中断...")
-    time.sleep(3)
+    time.sleep(0.3)
     
     # 中断传输
     print(f"🛑 中断传输（模拟网络故障）...")

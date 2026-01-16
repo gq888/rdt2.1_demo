@@ -14,7 +14,8 @@ import queue
 from pathlib import Path
 
 # 设置项目根目录
-TEST_DIR = Path(__file__).parent
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+TEST_DIR = PROJECT_ROOT
 DOWNLOADS_DIR = TEST_DIR / "downloads"
 
 class AsyncStreamReader:
@@ -118,7 +119,7 @@ def test_with_reordering_simulator():
     # 启动网络模拟器（添加延迟和抖动来模拟乱序）
     print("🔧 启动网络模拟器（模拟乱序网络）...")
     sim_cmd = [
-        sys.executable, "network_simulator_fixed.py",
+        sys.executable, "-m", "network_simulator_fixed",
         "--listen-port", "6665",
         "--target-host", "127.0.0.1", 
         "--target-port", "6666",

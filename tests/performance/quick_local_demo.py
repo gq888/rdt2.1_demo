@@ -9,8 +9,8 @@
 import os, sys, time, subprocess, hashlib
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-DL = ROOT / "downloads"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DL = PROJECT_ROOT / "downloads"
 DL.mkdir(exist_ok=True)
 
 def sha256(p: Path):
@@ -25,17 +25,17 @@ def sha256(p: Path):
 def main():
     port = 9000
     recv_cmd = [sys.executable, "-m", "rdtftp.cli_recv", "--port", str(port), "--out-dir", str(DL)]
-    p = subprocess.Popen(recv_cmd, cwd=str(ROOT))
+    p = subprocess.Popen(recv_cmd, cwd=str(PROJECT_ROOT))
 
     try:
         time.sleep(0.6)
-        src = ROOT / "test.bin"
+        src = PROJECT_ROOT / "test.bin"
         # 生成 3MB 文件
         src.write_bytes(os.urandom(1 * 1024 * 1024))
 
         send_cmd = [sys.executable, "-m", "rdtftp.cli_send", "--file", str(src), "--host", "127.0.0.1", "--port", str(port)]
         t0 = time.time()
-        subprocess.check_call(send_cmd, cwd=str(ROOT))
+        subprocess.check_call(send_cmd, cwd=str(PROJECT_ROOT))
         elapsed = time.time() - t0
 
         dst = DL / src.name
